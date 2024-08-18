@@ -1,0 +1,139 @@
+---
+title: "Predictive Modeling of COVID-19"
+author: "Aziz Asomiddinov, Tom Youngblood"
+date: "August 21, 2024"
+output: pdf_document
+---
+
+```{r Libraries}
+library(dplyr)
+library(tidyverse)
+library(MASS)
+```
+# Introduction
+
+## Abstract
+
+This R-Markdown file contains an exploratory data analysis of Kaggle's COVID-19 Dataset, and the process of fitting two machine learning models, LDA and QDA, to determine the variables associated with death by COVID-19. 
+
+There are five sections:
+1. Data Wrangling
+2. Exploratory Data Analysis
+3. Variable Selection
+4. Predictive Modeling
+5. Conclusions
+
+## Data
+
+The dataset, Kaggle's 'COVID-19 Dataset', can be found at this link: https://www.kaggle.com/datasets/meirnizri/covid19-dataset.
+
+The content of the datset contains 21 features and 1,048,576 unique patients. The features are listed below (source: Kaggle user meirnizri):
+- sex: 1 for female and 2 for male.
+- age: of the patient.
+- classification: covid test findings. Values 1-3 mean that the patient was diagnosed with covid in different
+- degrees. 4 or higher means that the patient is not a carrier of covid or that the test is inconclusive.
+- patient type: type of care the patient received in the unit. 1 for returned home and 2 for hospitalization.
+- pneumonia: whether the patient already have air sacs inflammation or not.
+- pregnancy: whether the patient is pregnant or not.
+- diabetes: whether the patient has diabetes or not.
+- copd: Indicates whether the patient has Chronic obstructive pulmonary disease or not.
+- asthma: whether the patient has asthma or not.
+- inmsupr: whether the patient is immunosuppressed or not.
+- hypertension: whether the patient has hypertension or not.
+- cardiovascular: whether the patient has heart or blood vessels related disease.
+- renal chronic: whether the patient has chronic renal disease or not.
+- other disease: whether the patient has other disease or not.
+- obesity: whether the patient is obese or not.
+- tobacco: whether the patient is a tobacco user.
+- usmr: Indicates whether the patient treated medical units of the first, second or third level.
+- medical unit: type of institution of the National Health System that provided the care.
+- intubed: whether the patient was connected to the ventilator.
+- icu: Indicates whether the patient had been admitted to an Intensive Care Unit.
+- date died: If the patient died indicate the date of death, and 9999-99-99 otherwise.
+
+# Data Wrangling
+The data is loaded and cleaned in this section.
+
+## Loading Data
+The data is loaded in the cell below.
+```{r Loading Data: Initial Findings}
+data <- read_csv('Covid Data.csv')
+
+head(data)
+```
+
+### Data Cleaning: Binary Response Variable Creation
+
+As seen in the table above, there is no binary response variable for the intended outcome variable, death. In the code below, the binary variable, 'DEATH', is created.
+
+```{r Data Cleaning: Binary Varaible Creation}
+# If DATE_DIED not 9999-99-99, patient did not die
+data$DIED <- ifelse(data$DATE_DIED != '9999-99-99', 1, 0)
+```
+
+### Data Cleaning: Removal of Missing Values
+
+Values of 97 and 99 indicate missing data; these values are immediately visible in the table above. Missing data values are removed in the cell below.
+
+```{r Data Cleaning: Removal of Missing Values}
+# Rows before missing value removal
+original_nrows <- nrow(data)
+cat('Number of rows before missing data removal: ', original_nrows, '\n')
+
+# Missing Value Removal
+data <- data %>% filter_all(all_vars(. != 97 & . != 99))
+
+# Rows after missing value removal
+new_nrows <- nrow(data)
+cat('Number of rows after data removal: ', new_nrows, '\n')
+
+# Rows removed
+removed <- original_nrows - new_nrows
+cat('Number of observations removed: ', removed, '\n')
+```
+
+### Data Cleaning: Datatype Conversion
+
+Many of the categorical variables in the data-set are classified as type <dbl>. The LDA and QDA algorithms from the MASS library may treat these variables as ordinal, which they are not. The code-cell below converts the necessary variables to <factor>.
+
+All variables besides those listed below were converted to factor:
+- age: of the patient.
+- date died: If the patient died indicate the date of death, and 9999-99-99 otherwise.
+- usmr: Indicates whether the patient treated medical units of the first, second or third level.
+  * usmr was not converted to factor as its data is not useful in factor form, according to R output.
+
+```{r Cleaning Data}
+
+# Convert necessary variables to factor
+data$SEX <- as.factor(data$SEX)
+data$CLASIFFICATION_FINAL <- as.factor(data$CLASIFFICATION_FINAL)
+data$PATIENT_TYPE <- as.factor(data$PATIENT_TYPE)
+data$PNEUMONIA <- as.factor(data$PNEUMONIA)
+data$PREGNANT <- as.factor(data$PREGNANT)
+data$DIABETES <- as.factor(data$DIABETES)
+data$COPD <- as.factor(data$COPD)
+data$ASTHMA <- as.factor(data$ASTHMA)
+data$INMSUPR <- as.factor(data$INMSUPR)
+data$HIPERTENSION <- as.factor(data$HIPERTENSION)
+data$CARDIOVASCULAR <- as.factor(data$CARDIOVASCULAR)
+data$RENAL_CHRONIC <- as.factor(data$RENAL_CHRONIC)
+data$OTHER_DISEASE <- as.factor(data$OTHER_DISEASE)
+data$OBESITY <- as.factor(data$OBESITY)
+data$TOBACCO <- as.factor(data$TOBACCO)
+#data$USMER < as.factor(data$USMER)
+data$MEDICAL_UNIT <- as.factor(data$MEDICAL_UNIT)
+data$INTUBED <- as.factor(data$INTUBED)
+data$ICU <- as.factor(data$ICU)
+```
+
+### Data Cleaning: Standardization
+
+Age is now the only ordinal variable in the data-set. It is standardized in the code-cell below.
+
+```{r Data Cleaning: Standardization}
+# Standardize AGE
+data$AGE <- scale(data$AGE)
+
+# Glimpse the data
+head(data$AGE)
+```
