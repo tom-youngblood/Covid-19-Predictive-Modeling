@@ -9,6 +9,7 @@ output: pdf_document
 library(dplyr)
 library(tidyverse)
 library(MASS)
+library(ggpubr)
 ```
 # Introduction
 
@@ -69,6 +70,7 @@ As seen in the table above, there is no binary response variable for the intende
 ```{r Data Cleaning: Binary Varaible Creation}
 # If DATE_DIED not 9999-99-99, patient did not die
 data$DIED <- ifelse(data$DATE_DIED != '9999-99-99', 1, 0)
+data$DIED <- as.factor(data$DIED)
 ```
 
 ### Data Cleaning: Removal of Missing Values
@@ -126,14 +128,25 @@ data$INTUBED <- as.factor(data$INTUBED)
 data$ICU <- as.factor(data$ICU)
 ```
 
-### Data Cleaning: Standardization
+# Exploratory Data Analysis: Assumptions
 
-Age is now the only ordinal variable in the data-set. It is standardized in the code-cell below.
+**The Primary Assumptions of LDA and QDA are:**
+1. The outcome variable must be categorical; our outcome variable, **DIED**, is categorical. This was ensured in the code above.
+2. LDA and QDA perform optimally when the predictor variables are continuous and normally distributed.
+3. LDA specifically assumes equal covariances between predictor variables, while QDA does not. Technically, this test is uneccesary, as there is only one continuous predictor variable: Age.
 
-```{r Data Cleaning: Standardization}
-# Standardize AGE
-data$AGE <- scale(data$AGE)
-
-# Glimpse the data
-head(data$AGE)
+## Assumption 2: Continuous Predictor variables are Normally Distributed
+```{r Normality of Age: Visual Assessment}
+# Normality of continuous variables
+ggqqplot(data$AGE)
 ```
+The one continuous predictor variable, age, may be normally distributed, but it is unclear. A shapiro test is neccessary.
+
+```{r Normality of Age: Visual Assessment}
+# Normality of continuous variables
+shapiro.test(sample(data$AGE,size=5000))
+```
+
+The output of the shapiro-wilk test provides evidence that age is not normally distributed. As age is the only continuous variable, it is unlikely that its distribution will greatly affect the model.
+
+# Background: 
