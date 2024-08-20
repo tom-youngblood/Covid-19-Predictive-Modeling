@@ -10,6 +10,9 @@ library(dplyr)
 library(tidyverse)
 library(MASS)
 library(ggpubr)
+library(caret)
+library(car)
+library(pROC)
 ```
 # Introduction
 
@@ -72,28 +75,6 @@ As seen in the table above, there is no binary response variable for the intende
 data$DIED <- ifelse(data$DATE_DIED != '9999-99-99', 1, 0)
 data$DIED <- as.factor(data$DIED)
 ```
-
-### Data Cleaning: Removal of Missing Values
-
-Values of 97 and 99 indicate missing data; these values are immediately visible in the table above. Missing data values are removed in the cell below.
-
-```{r Data Cleaning: Removal of Missing Values}
-# Rows before missing value removal
-original_nrows <- nrow(data)
-cat('Number of rows before missing data removal: ', original_nrows, '\n')
-
-# Missing Value Removal
-data <- data %>% filter_all(all_vars(. != 97 & . != 99))
-
-# Rows after missing value removal
-new_nrows <- nrow(data)
-cat('Number of rows after data removal: ', new_nrows, '\n')
-
-# Rows removed
-removed <- original_nrows - new_nrows
-cat('Number of observations removed: ', removed, '\n')
-```
-
 ### Data Cleaning: Datatype Conversion
 
 Many of the categorical variables in the data-set are classified as type <dbl>. The LDA and QDA algorithms from the MASS library may treat these variables as ordinal, which they are not. The code-cell below converts the necessary variables to <factor>.
@@ -104,12 +85,34 @@ All variables besides those listed below were converted to factor:
 - usmr: Indicates whether the patient treated medical units of the first, second or third level.
   * usmr was not converted to factor as its data is not useful in factor form, according to R output.
 
-```{r Cleaning Data}
+### Data Cleaning: Removal of Missing Values
+Values of 97, 98, and 99 indicate missing data; these values are immediately visible in the table above. Missing data values are removed in the cell below.
 
+```{r Data Cleaning: Removal of Missing Values}
+# Drop date died
+data <- data[,!names(data) %in% c("DATE_DIED", "USMER")]
+
+# Rows before missing value removal
+original_nrows <- nrow(data)
+cat('Number of rows before missing data removal: ', original_nrows, '\n')
+
+# Missing Value Removal
+data <- data <- data[!apply(data, 1, function(row) any(row %in% c(97, 98, 99))), ]
+
+# Drop varaibles
+data <- data[,!names(data) %in% c("SEX", "PATIENT_TYPE", "CLASSIFICATION_FINAL")]
+
+# Rows after missing value removal
+new_nrows <- nrow(data)
+cat('Number of rows after data removal: ', new_nrows, '\n')
+
+# Rows removed
+removed <- original_nrows - new_nrows
+cat('Number of observations removed: ', removed, '\n')
+```
+
+```{r Cleaning Data}
 # Convert necessary variables to factor
-data$SEX <- as.factor(data$SEX)
-data$CLASIFFICATION_FINAL <- as.factor(data$CLASIFFICATION_FINAL)
-data$PATIENT_TYPE <- as.factor(data$PATIENT_TYPE)
 data$PNEUMONIA <- as.factor(data$PNEUMONIA)
 data$PREGNANT <- as.factor(data$PREGNANT)
 data$DIABETES <- as.factor(data$DIABETES)
@@ -126,7 +129,25 @@ data$TOBACCO <- as.factor(data$TOBACCO)
 data$MEDICAL_UNIT <- as.factor(data$MEDICAL_UNIT)
 data$INTUBED <- as.factor(data$INTUBED)
 data$ICU <- as.factor(data$ICU)
+
+str(data)
 ```
+
+# Background: LDA and QDA
+
+**Linear Discriminant Analysis (LDA)** and **Quadratic Discriminant Analysis (QDA)** are both classification tasks that predict the probability of a categorical outcome variable belonging to a specific class.
+
+A class is made up of the results of each categories; for example, the categorical variable DIED has two classes:
+- Class 1: (DIED = 1)
+- Class 2: (DIED = 0)
+
+**Connection between LDA, QDA, and Logistic Regression**: All three methods, LDA, QDA, and Logistic Regression, attempt to predict the probability of a categorical outcome variable based on a set of input variables. The primary difference between the three forms of regression lie in their assumptions:
+
+- Logistic Regression: Does not have any distributional assumptions, but requires a categorical outcome variable.
+- LDA: Assumes that the predictor variables are normally distributed, that the predictor variables share the same covariance matrix, and that the outcome variable is categorical. This produces a linear decision boundary.
+- QDA: A version of LDA allows each class to have its own covariance matrix. This produces a quadratic decision boundary.
+
+**Decision Boundary**: The function that separates classes.
 
 # Exploratory Data Analysis: Assumptions
 
@@ -142,11 +163,286 @@ ggqqplot(data$AGE)
 ```
 The one continuous predictor variable, age, may be normally distributed, but it is unclear. A shapiro test is neccessary.
 
-```{r Normality of Age: Visual Assessment}
+```{r Normality of Age: Numerical Assessment}
 # Normality of continuous variables
 shapiro.test(sample(data$AGE,size=5000))
 ```
 
 The output of the shapiro-wilk test provides evidence that age is not normally distributed. As age is the only continuous variable, it is unlikely that its distribution will greatly affect the model.
 
-# Background: 
+## Assumption 3: The variance is constant among the DIED vs Survived
+
+## Assumption 4: Sample measurements are independent from eachother
+
+- Assumptions 3 and 4 are addressed later int the Variable selection section.
+
+# Variable Selection
+
+In this section, the variables that are most closely associated with COVID-19 death are defined. We must eliminate variables with any multi-collinearity or near-zero-variance
+
+```{r Finding Variables With High Collinearity}
+# Calculate VIF (from car package)
+multi_col_model <- lm(DIED ~ ., data = data)
+vif(multi_col_model)
+```
+
+'MEDICAL_UNIT' has high collinearity. It will be removed.
+
+```{r Finding variables with near zero variance}
+# Calculate the near-zero-variance (from caret)
+near_zero_var <- nearZeroVar(data, saveMetrics = TRUE)
+near_zero_var <- rownames(near_zero_var[near_zero_var$nzv == TRUE,])
+near_zero_var
+```
+
+The variables found to have multi-collinearity, near-zero-variance, or other negative traits are removed in the chunk below.
+
+```{r Removing varaibles with High Collinearity and Near Zero Variance}
+data <- data[,!names(data) %in% c("MEDICAL_UNIT", "USMER", "CLASIFFICATION_FINAL", "PREGNANT", "COPD", "ATHMA", "ANMSUPR", "TOBACCO")]
+str(data)
+```
+
+# Fitting the LDA Model
+
+In the code below, the LDA Model is fit on variables without multi-collinearity or near-zero-variance.
+
+```{r LDA}
+# Set the seed
+set.seed(1)
+
+# Fit the LDA model
+lda_model <- lda(DIED ~ ., data = data)
+
+# Make predictions
+lda_predictions <- predict(lda_model)
+
+# Confusion matrix
+lda_conf <- table(Predicted = lda_predictions$class, Actual = data$DIED)
+lda_conf
+
+str(data)
+```
+
+Above is the first LDA model. It uses all usable variables.
+
+# Fitting the QDA Model
+
+In the code below, the QDA Model is fit on variables without multi-collinearity or near-zero-variance.
+```{r QDA}
+# Set the seed
+set.seed(1)
+
+# Fit the LDA model
+qda_model <- qda(DIED ~ ., data = data)
+
+# Make predictions
+qda_predictions <- predict(qda_model)
+
+# Confusion matrix
+qda_conf <- table(Predicted = qda_predictions$class, Actual = data$DIED)
+qda_conf
+```
+Above is the first QDA model. It uses all usable variables.
+
+# Splitting the Data into Training Data and Testing Data
+
+In order to test the accuracy, among other metrics, of the model, the train-test paradigm will be used.
+
+```{r Train Test Split}
+set.seed(1)
+
+# Establish n
+n <- nrow(data)
+
+# Train test split
+tts <- rep(0:1,c(round(n*.3), n-round(n*.3)))
+
+# Get the TTS Split
+tts.split <- sample(tts, n)
+
+# Visualize the split (0 = Testing, 1 = Training)
+table(tts.split)
+```
+
+In the table above, the train test split is established. Approximately 70% (53782) of the data is allocated as testing data, while the other 30% (23050) is allocated as training data. 
+
+In the code-chunk below, the training and testing data is established
+```{r Establish Training and Testing Data}
+# Establish training and testing data
+training_data <- data[tts.split==1, ]
+testing_data <- data[tts.split==0, ]
+```
+
+# Refitting the Model with the Train-Test Paradigm and Testing Model Accuracy
+
+## Refitting the model with the Train-Test Paradigm
+
+In the code chunk below, the models are fit on the training and testing data.
+```{r Fitting LDA and QDA with Training Data}
+# Fit the LDA and QDA model on the training data
+lda_model <- lda(DIED ~ ., data = training_data)
+qda_model <- qda(DIED ~ ., data = training_data)
+```
+
+Then the training models are used to make predictions on the testing data.
+
+```{r LDA and QDA Predictions}
+# Make predictions on testing data
+lda_model_predictions <- predict(lda_model, testing_data)$class
+qda_model_predictions <- predict(qda_model, testing_data)$class
+```
+
+```{r }
+# Visualize the tables
+print("LDA MODEL")
+lda_conf <- table(predicted_deaths = lda_model_predictions, actual_deaths = testing_data$DIED)
+lda_conf
+cat("\n")
+
+print("QDA MODEL")
+qda_conf <- table(predicted_deaths = qda_model_predictions, actual_deaths = testing_data$DIED)
+qda_conf
+cat("\n")
+```
+
+# Chosing Best Model
+
+## Determining Model Accuracy
+In the code below, the best model is chosen based on its accuracy.
+
+**Accuracy** = $Total Correct Predictions/ All Predictions$
+
+```{r Assessing Accuracy}
+# Get metrics for LDA
+lda_tn <- lda_conf[1,1]
+lda_fn <- lda_conf[1,2]
+lda_fp <- lda_conf[2,1]
+lda_tp <- lda_conf[2,2]
+
+# Get metrics for QDA
+qda_tn <- qda_conf[1,1]
+qda_fn <- qda_conf[1,2]
+qda_fp <- qda_conf[2,1]
+qda_tp <- qda_conf[2,2]
+
+# Get accuracy for LDA
+lda_accuracy <- sum(lda_tp + lda_tn) / sum(lda_tn + lda_fn + lda_fp + lda_tp)
+
+# Get accuracy for QDA
+qda_accuracy <- sum(qda_tp + qda_tn) / sum(qda_tn + qda_fn + qda_fp + qda_tp)
+
+# Get recall for LDA
+lda_recall <- lda_tp / sum(lda_tp, lda_fp)
+
+# Get recall for QDA
+qda_recall <- qda_tp / sum(qda_tp, qda_fp)
+
+# Get precision for LDA
+lda_precision <- lda_tp / sum(lda_tp, lda_fp)
+
+# Get precision for QDA 
+qda_precision <- qda_tp / sum(qda_tp , lda_fp)
+
+# Print
+cat('LDA ACCURACY: ', lda_accuracy, '\n')
+cat('QDA ACCURACY: ', qda_accuracy, '\n')
+cat('\n')
+cat('LDA RECALL: ', lda_recall, '\n')
+cat('QDA RECALL: ', qda_recall, '\n')
+cat('\n')
+cat('LDA PRECISION: ', lda_precision, '\n')
+cat('QDA PRECISION: ', qda_precision, '\n')
+cat('\n')
+
+
+```
+
+As the LDA model has higher accuracy and higher recall, it is chosen as the best model, and will be assessed moving forward.
+
+The LDA model is 77.5% accurate in making classifications, meaning that 77.5% of all predictions made by the model will be correct.
+
+# Understanding the Best Model
+
+The coefficients of the best model are output below.
+```{r Understanding The Best Model}
+# Printing the coefficients of the model
+lda_model$scaling
+```
+The coefficients printed above are linear discriminant coefficients. Each linear discriminant coeffcient indicates how much the variable contributes to the observation's class determination, 'DIED' = 0 or 'DIED' = 1.
+
+The coefficients indicate that variables are positively or negatively associated with death from COVID-19.
+
+**Positive Association With Death by COVID-19**
+- AGE
+- ASTHMA
+- CARDIOVASCULAR
+- ICU
+
+**Negative Association With Death by COVID-19**
+- INTUBED
+- PNEUMONIA
+- DIABETES
+- INMSUPR
+- HIPERTENSION
+- OTHER_DISEASE
+- OBESITY
+- RENAL_CHRONIC
+
+# The 'Cut Off' Parameter and Mesures of Accuracy
+
+## LDA/QDA 'Cut Off' Parameter
+
+The **Cut Off* parameter in LDA and QDA models determines the point (probability) at which an observation is considered one class of the outcome variable or another. The Cut Off parameter, by detault, is set to 0.5.
+
+For instance, in this example, the Cut Off parameter determines whether or not an observation, output by the classification model, is classified as 'DIED' == 1 (died) or 'DIED' == 0 (survived). If the Cut Off parameter is set to 0.5, all observations resulting in a probability of 50% and higher of death, as predicted by the LDA or QDA model, would have their outcome variable's class, 'DIED', set to 1.
+
+### Affect of Cut Off On Recall
+
+Increasing the Cut Off parameter forces less parameters to be considered positive. In this scenario, increasing the Cut Off parameter would cause less deaths to be predicted.
+
+Therefore, more true positives may be considered negative, and become false negatives, reducing the recall.
+
+### Affect of Cut Off On Precision
+
+Alternatively, increasing the Cut Off parameter can increase precision, as it causes fewer false positives.
+
+# ROC Curve and Conclusion
+
+```{r ROC Curve}
+# Cutoff
+cutoff <- 0.5
+
+# Fix lda_model_predictions variable
+lda_model_predictions <- predict(lda_model, testing_data)
+
+# ROC Curve Step 1: Get probabilities for positive class
+lda_probabilities <- lda_model_predictions$posterior[,2]
+
+# ROC Curve Step 2: Create ROC curve
+lda_roc <- roc(testing_data$DIED, lda_probabilities)
+
+# ROC Curve Step 3: Create dataframe with columns tpr and fpr
+lda_roc_df <- data.frame(tpr = lda_roc$sensitivities, fpr = 1 - lda_roc$specificities)
+
+# ROC Curve Step 4: Graph
+ggplot(lda_roc_df, aes(x = fpr, y = tpr)) +
+  geom_line(color = 'blue') +
+  labs(title = "ROC Curve for LDA Model",
+       x = "False Positive Rate",
+       y = "True Positive Rate") +
+  geom_abline(slope = 1, intercept = 0, linetype = "dashed")
+```
+The blue ROC Curve represents the True Positive Rate against the False Positive Rate; it is compared to the dashed line, which represents typical random chance (an AUC of 0.5). 
+
+The greater the area under the curve (the closer the function gets to the top left corner of the graph), the more accurate the model is.
+
+The area under the curve is calculated below.
+
+```{r AUC: Area Under Curve}
+# Area under curve computation
+auc(lda_roc)
+```
+
+The Area Under the Curve Calculation is 0.8103, meaning that the model performs 31% (calculation: 0.81-0.50) better than random chance. 
+
+**Conclusion**: By convention, an AUC score from 0.8-0.9 is considered excellent, meaning that the model's prediction of death by COVID-19 is 'excellent'.
