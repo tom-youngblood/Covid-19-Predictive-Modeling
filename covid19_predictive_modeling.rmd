@@ -5,15 +5,6 @@ date: "August 21, 2024"
 output: pdf_document
 ---
 
-```{r Libraries}
-library(dplyr)
-library(tidyverse)
-library(MASS)
-library(ggpubr)
-library(caret)
-library(car)
-library(pROC)
-```
 # Introduction
 
 ## Abstract
@@ -21,44 +12,85 @@ library(pROC)
 This R-Markdown file contains an exploratory data analysis of Kaggle's COVID-19 Dataset, and the process of fitting two machine learning models, LDA and QDA, to determine the variables associated with death by COVID-19. 
 
 There are five sections:
+
 1. Data Wrangling
+
 2. Exploratory Data Analysis
+
 3. Variable Selection
+
 4. Predictive Modeling
+
 5. Conclusions
 
 ## Data
 
 The dataset, Kaggle's 'COVID-19 Dataset', can be found at this link: https://www.kaggle.com/datasets/meirnizri/covid19-dataset.
 
-The content of the datset contains 21 features and 1,048,576 unique patients. The features are listed below (source: Kaggle user meirnizri):
+The content of the dataset contains 21 features and 1,048,576 unique patients. The features are listed below (source: Kaggle user meirnizri):
+
 - sex: 1 for female and 2 for male.
+
 - age: of the patient.
-- classification: covid test findings. Values 1-3 mean that the patient was diagnosed with covid in different
+
+- classification: covid test findings. Values 1-3 mean that the patient was diagnosed with covid in different.
+
 - degrees. 4 or higher means that the patient is not a carrier of covid or that the test is inconclusive.
+
 - patient type: type of care the patient received in the unit. 1 for returned home and 2 for hospitalization.
 - pneumonia: whether the patient already have air sacs inflammation or not.
+
 - pregnancy: whether the patient is pregnant or not.
+
 - diabetes: whether the patient has diabetes or not.
+
 - copd: Indicates whether the patient has Chronic obstructive pulmonary disease or not.
+
 - asthma: whether the patient has asthma or not.
+
 - inmsupr: whether the patient is immunosuppressed or not.
+
 - hypertension: whether the patient has hypertension or not.
+
 - cardiovascular: whether the patient has heart or blood vessels related disease.
+
 - renal chronic: whether the patient has chronic renal disease or not.
+
 - other disease: whether the patient has other disease or not.
+
 - obesity: whether the patient is obese or not.
+
 - tobacco: whether the patient is a tobacco user.
+
 - usmr: Indicates whether the patient treated medical units of the first, second or third level.
+
 - medical unit: type of institution of the National Health System that provided the care.
+
 - intubed: whether the patient was connected to the ventilator.
+
 - icu: Indicates whether the patient had been admitted to an Intensive Care Unit.
+
 - date died: If the patient died indicate the date of death, and 9999-99-99 otherwise.
 
 # Data Wrangling
 The data is loaded and cleaned in this section.
 
 ## Loading Data
+
+Libraries must be loaded first.
+```{r Libraries}
+library(ggplot2)
+library(dplyr)
+library(tidyverse)
+library(tidyr)
+library(MASS)
+library(ggpubr)
+library(caret)
+library(car)
+library(pROC)
+library(leaps)
+```
+
 The data is loaded in the cell below.
 ```{r Loading Data: Initial Findings}
 data <- read_csv('Covid Data.csv')
@@ -70,20 +102,11 @@ head(data)
 
 As seen in the table above, there is no binary response variable for the intended outcome variable, death. In the code below, the binary variable, 'DEATH', is created.
 
-```{r Data Cleaning: Binary Varaible Creation}
+```{r Data Cleaning: Binary Variables Creation}
 # If DATE_DIED not 9999-99-99, patient did not die
 data$DIED <- ifelse(data$DATE_DIED != '9999-99-99', 1, 0)
 data$DIED <- as.factor(data$DIED)
 ```
-### Data Cleaning: Datatype Conversion
-
-Many of the categorical variables in the data-set are classified as type <dbl>. The LDA and QDA algorithms from the MASS library may treat these variables as ordinal, which they are not. The code-cell below converts the necessary variables to <factor>.
-
-All variables besides those listed below were converted to factor:
-- age: of the patient.
-- date died: If the patient died indicate the date of death, and 9999-99-99 otherwise.
-- usmr: Indicates whether the patient treated medical units of the first, second or third level.
-  * usmr was not converted to factor as its data is not useful in factor form, according to R output.
 
 ### Data Cleaning: Removal of Missing Values
 Values of 97, 98, and 99 indicate missing data; these values are immediately visible in the table above. Missing data values are removed in the cell below.
@@ -99,7 +122,7 @@ cat('Number of rows before missing data removal: ', original_nrows, '\n')
 # Missing Value Removal
 data <- data <- data[!apply(data, 1, function(row) any(row %in% c(97, 98, 99))), ]
 
-# Drop varaibles
+# Drop variables that are problematic later in the analysis
 data <- data[,!names(data) %in% c("SEX", "PATIENT_TYPE", "CLASSIFICATION_FINAL")]
 
 # Rows after missing value removal
@@ -111,7 +134,20 @@ removed <- original_nrows - new_nrows
 cat('Number of observations removed: ', removed, '\n')
 ```
 
-```{r Cleaning Data}
+### Data Cleaning: Datatype Conversion
+
+Many of the categorical variables in the data-set are classified as type <dbl>. The LDA and QDA algorithms from the MASS library may treat these variables as ordinal, which they are not. The code-cell below converts the necessary variables to <factor>.
+
+All variables besides those listed below were converted to factor:
+
+- age: of the patient.
+
+- date died: If the patient died indicate the date of death, and 9999-99-99 otherwise.
+
+- usmr: Indicates whether the patient treated medical units of the first, second or third level.
+
+  * usmr was not converted to factor as its data is not useful in factor form, according to R output.
+```{r Cleaning Data: Datatype Conversion}
 # Convert necessary variables to factor
 data$PNEUMONIA <- as.factor(data$PNEUMONIA)
 data$PREGNANT <- as.factor(data$PREGNANT)
@@ -138,55 +174,131 @@ str(data)
 **Linear Discriminant Analysis (LDA)** and **Quadratic Discriminant Analysis (QDA)** are both classification tasks that predict the probability of a categorical outcome variable belonging to a specific class.
 
 A class is made up of the results of each categories; for example, the categorical variable DIED has two classes:
+
 - Class 1: (DIED = 1)
+
 - Class 2: (DIED = 0)
 
 **Connection between LDA, QDA, and Logistic Regression**: All three methods, LDA, QDA, and Logistic Regression, attempt to predict the probability of a categorical outcome variable based on a set of input variables. The primary difference between the three forms of regression lie in their assumptions:
 
 - Logistic Regression: Does not have any distributional assumptions, but requires a categorical outcome variable.
+
 - LDA: Assumes that the predictor variables are normally distributed, that the predictor variables share the same covariance matrix, and that the outcome variable is categorical. This produces a linear decision boundary.
+
 - QDA: A version of LDA allows each class to have its own covariance matrix. This produces a quadratic decision boundary.
 
 **Decision Boundary**: The function that separates classes.
 
+# Exploratory Data Analysis: Introductory Visualizations
+
+## Density Plot of Age and Class of DIED
+
+The code chunk below produces density plots. The area is of each density plot represents the distribution of age corresponding to DIED=0 (survied) or DIED=1 (died), while the color of the density plot's area represents the class (DIED=0 or DIED=1).
+```{r Density Plot of Age and Class of DIED}
+# Density Plot 
+ggplot(data, aes(x = AGE, fill = DIED)) +
+  geom_density(alpha = 0.5) +
+  labs(title = 'Age Distribution by Class of DIED', x='Age', y='Density') 
+
+# Get the means of the ages of died and didn't die
+died_age <- data %>% filter(DIED==1)
+surv_age <- data %>% filter(DIED==0)
+mean(died_age$AGE)
+mean(surv_age$AGE)
+```
+Both distributions have a relatively bell shaped curve, suggesting normality. The age of patients who died has a mean around 62.44, which is greater than the age of patients who did not die, whose distribution had a mean of 48.5.
+
+## Distributions of Binary Predictors
+
+In the graphs below, the distributions of pre-existing conditions are often associate with death by COVID-19 are shown.
+
+```{r Bar Plots: Intubed}
+# Create function to use for each variable
+bar <- function(data, var) {
+  ggplot(data = data, aes_string(x = var)) +
+    geom_bar() +
+    labs(title = paste("Distribution of", var), x = var, y = "Count"
+    )
+}
+```
+
+```{r Bar Plots: PNEUMONIA}
+# Bar plot for PNEUMONIA
+bar(data, 'PNEUMONIA')
+```
+There were more patients with with pneumonia than without pneumonia.
+
+```{r Bar Plots: DIABETES}
+# Bar plot for DIABETES
+bar(data, 'DIABETES')
+```
+Significantly More patients did not have diabetes than did.
+
+```{r Bar Plots: OTHER_DISEASE}
+# Bar plot for HIPERTENSION
+bar(data, 'HIPERTENSION')
+```
+The  majority of patients did not have hypertension
+
+```{r Bar Plots: CARDIOVASCULAR}
+# Bar plot for CARDIOVASCULAR
+bar(data, 'CARDIOVASCULAR')
+```
+The vast majority of patients did not have cardiovascular disease
+
+```{r Bar Plots: OBESITY}
+# Bar plot for OBESITY
+bar(data, 'OBESITY')
+```
+The majority of patients were not obese.
+
 # Exploratory Data Analysis: Assumptions
 
 **The Primary Assumptions of LDA and QDA are:**
+
 1. The outcome variable must be categorical; our outcome variable, **DIED**, is categorical. This was ensured in the code above.
+
 2. LDA and QDA perform optimally when the predictor variables are continuous and normally distributed.
-3. LDA specifically assumes equal covariances between predictor variables, while QDA does not. Technically, this test is uneccesary, as there is only one continuous predictor variable: Age.
+
+3. LDA and QDA assume that the variance is constant among classes in the outcome variable (homoscedasticity).
+
+4. LDA and QDA assume that the variables are independent.
 
 ## Assumption 2: Continuous Predictor variables are Normally Distributed
 ```{r Normality of Age: Visual Assessment}
 # Normality of continuous variables
 ggqqplot(data$AGE)
 ```
-The one continuous predictor variable, age, may be normally distributed, but it is unclear. A shapiro test is neccessary.
+The one continuous predictor variable, age, may be normally distributed, but it is unclear. A Shapiro-Test is necessary.
 
 ```{r Normality of Age: Numerical Assessment}
 # Normality of continuous variables
 shapiro.test(sample(data$AGE,size=5000))
 ```
 
-The output of the shapiro-wilk test provides evidence that age is not normally distributed. As age is the only continuous variable, it is unlikely that its distribution will greatly affect the model.
+The output of the Shapiro-Wilk test provides evidence that age is not normally distributed. As age is the only continuous variable, it is unlikely that its distribution will greatly affect the model.
 
-## Assumption 3: The variance is constant among the DIED vs Survived
+## Assumption 3: The variance is constant among classes in the outcome variable (homoscedasticity)
 
-## Assumption 4: Sample measurements are independent from eachother
+```{r Assumption: Constant variance of DIED}
+# Normality of continuous variables of DIED
+leveneTest(AGE ~ DIED, data = data)
+```
+The assumption of homoscedasticity, which is the most important assumption in LDA and QDA analysis, is not violated.
 
-- Assumptions 3 and 4 are addressed later int the Variable selection section.
+## Assumption 4: Sample measurements are independent from each-other
+
+The design of the experiment suggests that the variables are independent.
 
 # Variable Selection
 
-In this section, the variables that are most closely associated with COVID-19 death are defined. We must eliminate variables with any multi-collinearity or near-zero-variance
+In this section, the variables that are most closely associated with COVID-19 death are defined. We must eliminate variables with any multi-collinearity or near-zero-variance first.
 
 ```{r Finding Variables With High Collinearity}
 # Calculate VIF (from car package)
 multi_col_model <- lm(DIED ~ ., data = data)
 vif(multi_col_model)
 ```
-
-'MEDICAL_UNIT' has high collinearity. It will be removed.
 
 ```{r Finding variables with near zero variance}
 # Calculate the near-zero-variance (from caret)
@@ -197,14 +309,28 @@ near_zero_var
 
 The variables found to have multi-collinearity, near-zero-variance, or other negative traits are removed in the chunk below.
 
-```{r Removing varaibles with High Collinearity and Near Zero Variance}
-data <- data[,!names(data) %in% c("MEDICAL_UNIT", "USMER", "CLASIFFICATION_FINAL", "PREGNANT", "COPD", "ATHMA", "ANMSUPR", "TOBACCO")]
+```{r Removing variables with High Collinearity and Near Zero Variance}
+data <- data[,!names(data) %in% c("MEDICAL_UNIT", "USMER", "CLASIFFICATION_FINAL", "PREGNANT", "COPD", "ASTHMA", "IMNSUPR", "TOBACCO")]
 str(data)
 ```
 
+# Variable Selection
+
+One of the most important parts of the model building process is variable selection. In this section, best subsets variable selection was used. As best subsets selection does not work on classes of 'lda' or 'qda', a logistic regression is used.
+
+```{r Variable Selection}
+# LDA variable selection
+full_model <- glm(DIED ~ ., data = data, family = binomial, trace = TRUE)
+step_model <- stepAIC(full_model, direction = "both")
+summary(step_model)
+```
+According to the step-wise selection, all variables are highly statistically significant predictors of death by COVID-19. This is likely due to to previous heavy pruning of variables earlier with tests such as tests for multi-collinearity and non-zero-variance. 
+
+As the model's deviance did not drop by removing variables, as shown by the output of the stepAIC function, it is not necessary to remove any variables. Furthermore, these variables have already been tested for multi-collinearity.
+
 # Fitting the LDA Model
 
-In the code below, the LDA Model is fit on variables without multi-collinearity or near-zero-variance.
+In the code below, the LDA Model is fit on the variables output by stepAIC.
 
 ```{r LDA}
 # Set the seed
@@ -219,15 +345,13 @@ lda_predictions <- predict(lda_model)
 # Confusion matrix
 lda_conf <- table(Predicted = lda_predictions$class, Actual = data$DIED)
 lda_conf
-
-str(data)
 ```
 
-Above is the first LDA model. It uses all usable variables.
 
 # Fitting the QDA Model
 
-In the code below, the QDA Model is fit on variables without multi-collinearity or near-zero-variance.
+In the code below, the QDA Model is fit on the variables output by stepAIC.
+
 ```{r QDA}
 # Set the seed
 set.seed(1)
@@ -242,7 +366,7 @@ qda_predictions <- predict(qda_model)
 qda_conf <- table(Predicted = qda_predictions$class, Actual = data$DIED)
 qda_conf
 ```
-Above is the first QDA model. It uses all usable variables.
+These models confirm that lda and qda work with the data. In the section below, they are refit on testing data, and their accuracy is tested.
 
 # Splitting the Data into Training Data and Testing Data
 
@@ -275,13 +399,16 @@ testing_data <- data[tts.split==0, ]
 
 # Refitting the Model with the Train-Test Paradigm and Testing Model Accuracy
 
-## Refitting the model with the Train-Test Paradigm
-
 In the code chunk below, the models are fit on the training and testing data.
 ```{r Fitting LDA and QDA with Training Data}
 # Fit the LDA and QDA model on the training data
 lda_model <- lda(DIED ~ ., data = training_data)
 qda_model <- qda(DIED ~ ., data = training_data)
+
+cat('\n','LDA MODEL', '\n')
+lda_model
+cat('\n','QDA MODEL', '\n')
+qda_model
 ```
 
 Then the training models are used to make predictions on the testing data.
@@ -292,7 +419,9 @@ lda_model_predictions <- predict(lda_model, testing_data)$class
 qda_model_predictions <- predict(qda_model, testing_data)$class
 ```
 
-```{r }
+The confusion matrix for each model is visualized below
+
+```{r LDA and QDA Confusion Matrices}
 # Visualize the tables
 print("LDA MODEL")
 lda_conf <- table(predicted_deaths = lda_model_predictions, actual_deaths = testing_data$DIED)
@@ -308,9 +437,7 @@ cat("\n")
 # Chosing Best Model
 
 ## Determining Model Accuracy
-In the code below, the best model is chosen based on its accuracy.
-
-**Accuracy** = $Total Correct Predictions/ All Predictions$
+In the code below, the best model is chosen based on its accuracy, recall, and precision.
 
 ```{r Assessing Accuracy}
 # Get metrics for LDA
@@ -356,10 +483,9 @@ cat('\n')
 
 
 ```
-
 As the LDA model has higher accuracy and higher recall, it is chosen as the best model, and will be assessed moving forward.
 
-The LDA model is 77.5% accurate in making classifications, meaning that 77.5% of all predictions made by the model will be correct.
+The LDA model is 77% accurate in making classifications, meaning that 77% of all predictions made by the model will be correct.
 
 # Understanding the Best Model
 
@@ -368,13 +494,12 @@ The coefficients of the best model are output below.
 # Printing the coefficients of the model
 lda_model$scaling
 ```
-The coefficients printed above are linear discriminant coefficients. Each linear discriminant coeffcient indicates how much the variable contributes to the observation's class determination, 'DIED' = 0 or 'DIED' = 1.
+The coefficients printed above are linear discriminant coefficients. Each linear discriminant coefficient indicates how much the variable contributes to the observation's class determination, 'DIED' = 0 or 'DIED' = 1.
 
 The coefficients indicate that variables are positively or negatively associated with death from COVID-19.
 
 **Positive Association With Death by COVID-19**
 - AGE
-- ASTHMA
 - CARDIOVASCULAR
 - ICU
 
@@ -388,11 +513,11 @@ The coefficients indicate that variables are positively or negatively associated
 - OBESITY
 - RENAL_CHRONIC
 
-# The 'Cut Off' Parameter and Mesures of Accuracy
+# The 'Cut Off' Parameter and Measures of Accuracy
 
 ## LDA/QDA 'Cut Off' Parameter
 
-The **Cut Off* parameter in LDA and QDA models determines the point (probability) at which an observation is considered one class of the outcome variable or another. The Cut Off parameter, by detault, is set to 0.5.
+The **Cut Off* parameter in LDA and QDA models determines the point (probability) at which an observation is considered one class of the outcome variable or another. The Cut Off parameter, by default, is set to 0.5.
 
 For instance, in this example, the Cut Off parameter determines whether or not an observation, output by the classification model, is classified as 'DIED' == 1 (died) or 'DIED' == 0 (survived). If the Cut Off parameter is set to 0.5, all observations resulting in a probability of 50% and higher of death, as predicted by the LDA or QDA model, would have their outcome variable's class, 'DIED', set to 1.
 
@@ -400,16 +525,16 @@ For instance, in this example, the Cut Off parameter determines whether or not a
 
 Increasing the Cut Off parameter forces less parameters to be considered positive. In this scenario, increasing the Cut Off parameter would cause less deaths to be predicted.
 
-Therefore, more true positives may be considered negative, and become false negatives, reducing the recall.
+Therefore, more true positives may be considered negative. This causes an increased number of false negatives, reducing the recall.
 
 ### Affect of Cut Off On Precision
 
-Alternatively, increasing the Cut Off parameter can increase precision, as it causes fewer false positives.
+Alternatively, increasing the Cut Off parameter can increase precision by reducing the number of false positives.
 
 # ROC Curve and Conclusion
 
 ```{r ROC Curve}
-# Cutoff
+# Cut Off
 cutoff <- 0.5
 
 # Fix lda_model_predictions variable
@@ -443,6 +568,10 @@ The area under the curve is calculated below.
 auc(lda_roc)
 ```
 
-The Area Under the Curve Calculation is 0.8103, meaning that the model performs 31% (calculation: 0.81-0.50) better than random chance. 
+The Area Under the Curve Calculation is 0.8, meaning that the model performs 30% (calculation: 0.80-0.50) better than random chance. 
 
-**Conclusion**: By convention, an AUC score from 0.8-0.9 is considered excellent, meaning that the model's prediction of death by COVID-19 is 'excellent'.
+In the case of this analysis, it is more concerning to make a false negative than a false positive, as the outcome of a false negative may be death without treatment. If a false positive is predicted, the patient can take actions to prevent death by COVID-19; if a flase negative is produced, a patient cannot.
+
+# Conclusions
+
+By convention, an AUC score from 0.8-0.9 is considered excellent, meaning that the model's prediction of death by COVID-19 is 'excellent'. The accuracy of the model is 77%, meaning that 77% of all predictions will be correct.
